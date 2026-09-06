@@ -20,7 +20,7 @@ public class RedirectService : IRedirectService
     private readonly ILogger<RedirectService> _logger;
 
     // Single-flight map: only one in-flight DB load per short code.
-    private readonly ConcurrentDictionary<string, Task<string?>> _inFlight = new();
+    private readonly ConcurrentDictionary<string, Task<ResolvedRedirect?>> _inFlight = new();
 
     public RedirectService(
         IRedirectCache cache,
@@ -32,7 +32,7 @@ public class RedirectService : IRedirectService
         _logger = logger;
     }
 
-    public async Task<string?> ResolveAsync(string shortCode, CancellationToken cancellationToken = default)
+    public async Task<ResolvedRedirect?> ResolveAsync(string shortCode, CancellationToken cancellationToken = default)
     {
         // 1) Cache lookup.
         var cached = await _cache.GetAsync(shortCode, cancellationToken);
@@ -51,11 +51,11 @@ public class RedirectService : IRedirectService
         {
             // Remove the coalescing entry once the shared task completes so future
             // misses re-query. Compare against our task to avoid removing a newer one.
-            _inFlight.TryRemove(new KeyValuePair<string, Task<string?>>(shortCode, task));
+            _inFlight.TryRemove(new KeyValuePair<string, Task<ResolvedRedirect?>>(shortCode, task));
         }
     }
 
-    private async Task<string?> LoadAndCacheAsync(string shortCode, CancellationToken cancellationToken)
+    private async Task<ResolvedRedirect?> LoadAndCacheAsync(string shortCode, CancellationToken cancellationToken)
     {
         var url = await _dbContext.Set<Url>()
             .AsNoTracking()
@@ -68,7 +68,7 @@ public class RedirectService : IRedirectService
             return null;
         }
 
-        var destination = CachedUrlDestination.For(url.OriginalUrl, url.ExpiresAt, url.IsActive);
+        var destination = CachedUrlDestination.For(url.Id, url.OriginalUrl, url.ExpiresAt, url.IsActive);
         await _cache.SetAsync(shortCode, destination, cancellationToken);
 
         return Evaluate(destination);
@@ -78,7 +78,7 @@ public class RedirectService : IRedirectService
     /// Application-level expiration/activation check. SQL remains the source of truth;
     /// this only decides whether a cached entry is currently servable.
     /// </summary>
-    private static string? Evaluate(CachedUrlDestination destination)
+    private static ResolvedRedirect? Evaluate(CachedUrlDestination destination)
     {
         if (!destination.Exists || !destination.IsActive)
             return null;
@@ -86,6 +86,9 @@ public class RedirectService : IRedirectService
         if (destination.ExpiresAt.HasValue && destination.ExpiresAt.Value <= DateTime.UtcNow)
             return null;
 
-        return destination.OriginalUrl;
+        if (destination.UrlId is null || destination.OriginalUrl is null)
+            return null;
+
+        return new ResolvedRedirect(destination.UrlId.Value, destination.OriginalUrl);
     }
 }

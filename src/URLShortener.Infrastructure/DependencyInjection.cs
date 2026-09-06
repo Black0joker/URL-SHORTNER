@@ -1,4 +1,4 @@
-using System.Threading.RateLimiting;
+﻿using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
@@ -11,10 +11,12 @@ using StackExchange.Redis;
 using URLShortener.Application.Common;
 using URLShortener.Application.Interfaces;
 using URLShortener.Application.Services;
+using URLShortener.Infrastructure.Analytics;
 using URLShortener.Infrastructure.Authentication;
 using URLShortener.Infrastructure.BackgroundJobs;
 using URLShortener.Infrastructure.Health;
 using URLShortener.Infrastructure.Persistence;
+using URLShortener.Infrastructure.QrCodes;
 using URLShortener.Infrastructure.RateLimiting;
 using URLShortener.Infrastructure.Redis;
 
@@ -33,6 +35,13 @@ public static class DependencyInjection
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
         services.AddScoped<ITokenService, TokenService>();
 
+        services.Configure<UrlShorteningOptions>(configuration.GetSection(UrlShorteningOptions.SectionName));
+        services.Configure<QrCodeOptions>(configuration.GetSection(QrCodeOptions.SectionName));
+        services.Configure<AnalyticsOptions>(configuration.GetSection(AnalyticsOptions.SectionName));
+
+        // QR rendering is pure CPU work with no external dependencies.
+        services.AddSingleton<IQrCodeRenderer, QrCoderRenderer>();
+
         // Redis
         var redisOptions = configuration.GetSection(RedisOptions.SectionName).Get<RedisOptions>() ?? new RedisOptions();
         services.Configure<RedisOptions>(configuration.GetSection(RedisOptions.SectionName));
@@ -47,11 +56,23 @@ public static class DependencyInjection
             });
 
             services.AddSingleton<IRedirectCache, RedisRedirectCache>();
+
+            // Phase 7: asynchronous analytics pipeline.
+            // Redirect -> in-process buffer -> flush worker -> Redis stream -> aggregation worker -> SQL.
+            services.AddSingleton<ChannelClickEventPublisher>();
+            services.AddSingleton<IClickEventPublisher>(sp => sp.GetRequiredService<ChannelClickEventPublisher>());
+            services.AddHostedService<ClickEventFlushWorker>();
+            services.AddHostedService<AnalyticsAggregationWorker>();
+
+            // Phase 8: Redis-backed QR image cache.
+            services.AddSingleton<IQrCodeCache, RedisQrCodeCache>();
         }
         else
         {
             // No Redis configured: cache reads are misses, writes are no-ops.
             services.AddSingleton<IRedirectCache, NullRedirectCache>();
+            services.AddSingleton<IClickEventPublisher, NullClickEventPublisher>();
+            services.AddSingleton<IQrCodeCache, NullQrCodeCache>();
         }
 
         // Expiration cleanup worker (Phase 4)
@@ -124,6 +145,18 @@ public static class DependencyInjection
 
         return services;
     }
+}
+
+/// <summary>
+/// No-op QR cache when Redis is not configured: every request regenerates the image.
+/// </summary>
+internal class NullQrCodeCache : IQrCodeCache
+{
+    public Task<byte[]?> GetAsync(string key, CancellationToken cancellationToken = default)
+        => Task.FromResult<byte[]?>(null);
+
+    public Task SetAsync(string key, byte[] content, TimeSpan ttl, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
 }
 
 /// <summary>

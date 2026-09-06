@@ -7,6 +7,8 @@ namespace URLShortener.Application.Common;
 /// </summary>
 public sealed record CachedUrlDestination
 {
+    /// <summary>Database identity of the URL; used for analytics attribution. Null for legacy entries.</summary>
+    public Guid? UrlId { get; init; }
     public bool Exists { get; init; }
     public string? OriginalUrl { get; init; }
     public DateTime? ExpiresAt { get; init; }
@@ -20,8 +22,9 @@ public sealed record CachedUrlDestination
         IsActive = false
     };
 
-    public static CachedUrlDestination For(string originalUrl, DateTime? expiresAt, bool isActive) => new()
+    public static CachedUrlDestination For(Guid urlId, string originalUrl, DateTime? expiresAt, bool isActive) => new()
     {
+        UrlId = urlId,
         Exists = true,
         OriginalUrl = originalUrl,
         ExpiresAt = expiresAt,

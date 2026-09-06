@@ -12,6 +12,8 @@ public static class DependencyInjection
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IRedirectService, RedirectService>();
         services.AddScoped<IExpiredUrlCleanupService, ExpiredUrlCleanupService>();
+        services.AddScoped<IAnalyticsService, AnalyticsService>();
+        services.AddScoped<IQrCodeService, QrCodeService>();
         services.AddSingleton<IShortCodeGenerator, ShortCodeGenerator>();
 
         return services;

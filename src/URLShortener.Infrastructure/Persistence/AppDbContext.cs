@@ -11,6 +11,9 @@ public class AppDbContext : IdentityDbContext<User, IdentityRole<Guid>, Guid>
 
     public DbSet<Url> Urls => Set<Url>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<UrlDailyStat> UrlDailyStats => Set<UrlDailyStat>();
+    public DbSet<UrlCountryDailyStat> UrlCountryDailyStats => Set<UrlCountryDailyStat>();
+    public DbSet<UrlDeviceDailyStat> UrlDeviceDailyStats => Set<UrlDeviceDailyStat>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -50,6 +53,40 @@ public class AppDbContext : IdentityDbContext<User, IdentityRole<Guid>, Guid>
                 .WithMany(u => u.Urls)
                 .HasForeignKey(u => u.UserId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // Analytics aggregates (Phase 7): composite keys mirror the MERGE upsert shape
+        // used by the aggregation worker, so (UrlId, Date[, dimension]) lookups are index-only.
+        builder.Entity<UrlDailyStat>(entity =>
+        {
+            entity.ToTable("UrlDailyStats");
+            entity.HasKey(s => new { s.UrlId, s.Date });
+            entity.Property(s => s.Date).HasColumnType("date");
+
+            entity.HasOne<Url>().WithMany().HasForeignKey(s => s.UrlId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<UrlCountryDailyStat>(entity =>
+        {
+            entity.ToTable("UrlCountryDailyStats");
+            entity.HasKey(s => new { s.UrlId, s.Date, s.CountryCode });
+            entity.Property(s => s.Date).HasColumnType("date");
+            entity.Property(s => s.CountryCode).IsRequired().HasMaxLength(2);
+
+            entity.HasOne<Url>().WithMany().HasForeignKey(s => s.UrlId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<UrlDeviceDailyStat>(entity =>
+        {
+            entity.ToTable("UrlDeviceDailyStats");
+            entity.HasKey(s => new { s.UrlId, s.Date, s.DeviceType });
+            entity.Property(s => s.Date).HasColumnType("date");
+            entity.Property(s => s.DeviceType).IsRequired().HasMaxLength(16);
+
+            entity.HasOne<Url>().WithMany().HasForeignKey(s => s.UrlId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<RefreshToken>(entity =>

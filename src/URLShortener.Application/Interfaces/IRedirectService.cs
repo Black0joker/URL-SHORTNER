@@ -1,3 +1,5 @@
+using URLShortener.Application.Common;
+
 namespace URLShortener.Application.Interfaces;
 
 /// <summary>
@@ -8,8 +10,8 @@ namespace URLShortener.Application.Interfaces;
 public interface IRedirectService
 {
     /// <summary>
-    /// Returns the destination URL for the short code, or null when the code
-    /// does not exist, is inactive, or has expired.
+    /// Returns the resolved redirect (URL id + destination) for the short code,
+    /// or null when the code does not exist, is inactive, or has expired.
     /// </summary>
-    Task<string?> ResolveAsync(string shortCode, CancellationToken cancellationToken = default);
+    Task<ResolvedRedirect?> ResolveAsync(string shortCode, CancellationToken cancellationToken = default);
 }

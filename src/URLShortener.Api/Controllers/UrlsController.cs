@@ -14,10 +14,17 @@ namespace URLShortener.Api.Controllers;
 public class UrlsController : ControllerBase
 {
     private readonly IUrlService _urlService;
+    private readonly IAnalyticsService _analyticsService;
+    private readonly IQrCodeService _qrCodeService;
 
-    public UrlsController(IUrlService urlService)
+    public UrlsController(
+        IUrlService urlService,
+        IAnalyticsService analyticsService,
+        IQrCodeService qrCodeService)
     {
         _urlService = urlService;
+        _analyticsService = analyticsService;
+        _qrCodeService = qrCodeService;
     }
 
     [HttpPost]
@@ -82,6 +89,38 @@ public class UrlsController : ControllerBase
         var userId = GetCurrentUserId();
         await _urlService.DeleteUrlAsync(id, userId);
         return NoContent();
+    }
+
+    /// <summary>Phase 7: aggregated click statistics for an owned URL.</summary>
+    [HttpGet("{id:guid}/stats")]
+    [EnableRateLimiting(RateLimitPolicies.UrlRead)]
+    [ProducesResponseType(typeof(UrlStatsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetUrlStats(Guid id, [FromQuery] int days = 30, CancellationToken cancellationToken = default)
+    {
+        var userId = GetCurrentUserId();
+        var stats = await _analyticsService.GetUrlStatsAsync(id, userId, days, cancellationToken);
+
+        if (stats == null)
+            return NotFound();
+
+        return Ok(stats);
+    }
+
+    /// <summary>Phase 8: QR code (PNG or SVG) encoding the short URL.</summary>
+    [HttpGet("{id:guid}/qr")]
+    [EnableRateLimiting(RateLimitPolicies.UrlRead)]
+    [ProducesResponseType(typeof(byte[]), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetQrCode(Guid id, [FromQuery] string format = "png", CancellationToken cancellationToken = default)
+    {
+        var userId = GetCurrentUserId();
+        var image = await _qrCodeService.GetQrCodeAsync(id, userId, format, cancellationToken);
+
+        if (image == null)
+            return NotFound();
+
+        return File(image.Content, image.ContentType);
     }
 
     private Guid GetCurrentUserId()
